@@ -32,7 +32,7 @@ body {
 @media(min-width:768px) {
 	#page-wrapper {
 		position: inherit;
-		margin: 50px 0 0 250px;		# 50px is Top nav size
+		margin: 50px 250px 0 0px;		/* 50px is Top nav size*/
 		padding: 0 30px;
 		border-left: 1px solid #e7e7e7;
 	}
@@ -111,8 +111,8 @@ body {
 }
 
 .navbar-top-links .dropdown-user {
-	right: 0;
-	left: auto;
+	left: 0;
+	right: auto;
 }
 
 /*
@@ -309,6 +309,7 @@ body {
 	.sidebar {
 		z-index: 1;
 		position: absolute;
+		right: 0px;
 		width: 250px;
 	}
 

@@ -1,0 +1,209 @@
+<style>
+  #marker {
+    width: 20px;
+    height: 20px;
+    border: 1px solid #088;
+    border-radius: 10px;
+    background-color: #0FF;
+    opacity: 0.5;
+  }
+  #vienna {
+    text-decoration: none;
+    color: white;
+    font-size: 11pt;
+    font-weight: bold;
+    text-shadow: black 0.1em 0.1em 0.2em;
+  }
+  .popover-content {
+    min-width: 180px;
+  }
+</style>
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-lg-12">
+            <h1 class="page-header" style="text-align:center;"><%- title %></h1>
+        </div>
+        <!-- /.col-lg-12 -->
+    </div>
+    <!-- /.row -->
+    <div class="row">
+        <div class="panel panel-default">
+            <div class="panel-body">
+<!--               <button onclick="removeMarker();">
+                Remove
+              </button> -->
+              <div id="map" class="map"></div>
+            </div>
+        </div>
+        <!-- /.col-lg-12 -->
+    </div>
+    <!-- /.row -->
+</div>
+<script src="http://www.openlayers.org/api/OpenLayers.js"></script>
+<script src="https://code.jquery.com/jquery-3.3.1.min.js"></script>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/2.0.4/socket.io.js"></script>
+<!-- <script data-main="/static/javascripts/socket.io" src="/lib/requirejs/require.js"></script> -->
+<script>
+  var map,popup,markers,socket,cars={};
+  var startLocation = <%- startLocation %>;
+  var serials = <%- serials %>;
+  var selectedSerial = '<%- selectedSerial %>';
+  function getSerialInfo(serialNumber){
+    var out="<div style='direction:rtl;text-align:right;'>"+"سریال:"+serialNumber;
+    for(var i = 0;i < serials.length;i++){
+      if(serials[i]._id==serialNumber && serials[i].serialData.length>0){
+        out += "<br/>\nنام : "+serials[i].serialData[0].name+"<br/>\nتوضیحات : "+serials[i].serialData[0].description;
+        return out;
+      }
+    }
+    return out;
+  }
+  function utmToLatLng(zone, easting, northing, northernHemisphere){
+    if (!northernHemisphere){
+        northing = 10000000 - northing;
+    }
+
+    var a = 6378137;
+    var e = 0.081819191;
+    var e1sq = 0.006739497;
+    var k0 = 0.9996;
+
+    var arc = northing / k0;
+    var mu = arc / (a * (1 - Math.pow(e, 2) / 4.0 - 3 * Math.pow(e, 4) / 64.0 - 5 * Math.pow(e, 6) / 256.0));
+
+    var ei = (1 - Math.pow((1 - e * e), (1 / 2.0))) / (1 + Math.pow((1 - e * e), (1 / 2.0)));
+
+    var ca = 3 * ei / 2 - 27 * Math.pow(ei, 3) / 32.0;
+
+    var cb = 21 * Math.pow(ei, 2) / 16 - 55 * Math.pow(ei, 4) / 32;
+    var cc = 151 * Math.pow(ei, 3) / 96;
+    var cd = 1097 * Math.pow(ei, 4) / 512;
+    var phi1 = mu + ca * Math.sin(2 * mu) + cb * Math.sin(4 * mu) + cc * Math.sin(6 * mu) + cd * Math.sin(8 * mu);
+
+    var n0 = a / Math.pow((1 - Math.pow((e * Math.sin(phi1)), 2)), (1 / 2.0));
+
+    var r0 = a * (1 - e * e) / Math.pow((1 - Math.pow((e * Math.sin(phi1)), 2)), (3 / 2.0));
+    var fact1 = n0 * Math.tan(phi1) / r0;
+
+    var _a1 = 500000 - easting;
+    var dd0 = _a1 / (n0 * k0);
+    var fact2 = dd0 * dd0 / 2;
+
+    var t0 = Math.pow(Math.tan(phi1), 2);
+    var Q0 = e1sq * Math.pow(Math.cos(phi1), 2);
+    var fact3 = (5 + 3 * t0 + 10 * Q0 - 4 * Q0 * Q0 - 9 * e1sq) * Math.pow(dd0, 4) / 24;
+
+    var fact4 = (61 + 90 * t0 + 298 * Q0 + 45 * t0 * t0 - 252 * e1sq - 3 * Q0 * Q0) * Math.pow(dd0, 6) / 720;
+
+    var lof1 = _a1 / (n0 * k0);
+    var lof2 = (1 + 2 * t0 + Q0) * Math.pow(dd0, 3) / 6.0;
+    var lof3 = (5 - 2 * Q0 + 28 * t0 - 3 * Math.pow(Q0, 2) + 8 * e1sq + 24 * Math.pow(t0, 2)) * Math.pow(dd0, 5) / 120;
+    var _a2 = (lof1 - lof2 + lof3) / Math.cos(phi1);
+    var _a3 = _a2 * 180 / Math.PI;
+
+    var latitude = 180 * (phi1 - fact1 * (fact2 + fact3 + fact4)) / Math.PI;
+
+    if (!northernHemisphere){
+      latitude = -latitude;
+    }
+
+    var longitude = ((zone > 0) && (6 * zone - 183.0) || 3.0) - _a3;
+
+    var obj = {
+          latitude : latitude,
+          longitude: longitude
+    };
+
+
+    return obj;
+  }
+  function addCar(lon,lat,popdata,serialNumber,notransform){
+    console.log('addCar(',lon,lat,popdata,serialNumber,')');
+    var notransform = (notransform)?notransform:false;
+    if(!notransform){
+      var lonLat = new OpenLayers.LonLat( lon,lat)//59.5812886, 36.3040583 )
+            .transform(
+              new OpenLayers.Projection("EPSG:4326"), // transform from WGS 1984
+              map.getProjectionObject() // to Spherical Mercator Projection
+            );
+    }else{//EPSG:23040
+      var lonLat = new OpenLayers.LonLat( lon,lat)
+        .transform(
+              new OpenLayers.Projection("EPSG:23040"), // transform from WGS 1984
+              map.getProjectionObject() // to Spherical Mercator Projection
+            );
+    }
+    var position = lonLat;
+    console.log('position',position);
+    var size = new OpenLayers.Size(42,42);
+    var offset = new OpenLayers.Pixel(-(size.w/2), -size.h);
+//     var icon = new OpenLayers.Icon('http://icons.iconarchive.com/icons/icons8/windows-8/32/Transport-Car-icon.png', size, offset);
+    var icon = new OpenLayers.Icon('/static/images/default.ico.png', size, offset);
+    var marker = new OpenLayers.Marker(lonLat,icon);
+    popdata = getSerialInfo(serialNumber)+"<br/>\n"+popdata+'</div>';
+    marker.events.register("click",marker,function(e){
+      console.log(e);
+      popup = new OpenLayers.Popup.FramedCloud("chicken",
+                   marker.lonlat,
+                   new OpenLayers.Size(200, 200),
+                   popdata,//"example popup",
+                   null, true);
+      map.addPopup(popup);
+    });
+    console.log('marker',marker);
+    console.log(cars[serialNumber]);
+    markers.clearMarkers();
+    if(!notransform){
+      delete cars[serialNumber].marker;
+      cars[serialNumber]['marker'] = marker;        
+      console.log(cars);
+    }
+    markers.addMarker(marker);
+  }
+
+  $(document).ready(function(){
+    console.log('serials',serials);
+    socket = io.connect('http://46.105.248.68:4000/');
+    socket.on('connect', function(){
+      console.log('connected!');
+    });
+    socket.on('message', function (data) {
+      console.log('socket.io',data);
+      if(data.serialNumber && data.serialNumber==selectedSerial){
+        cars[data.serialNumber] = data;
+        addCar(data.lon,data.lat,'سرعت:'+data.speed,data.serialNumber);
+      }
+    });
+    
+    map = new OpenLayers.Map("map");
+    map.addLayer(new OpenLayers.Layer.OSM());
+    markers = new OpenLayers.Layer.Markers( "Markers" );
+    map.addLayer(markers);
+    var zoom=10;
+    var lonLat = new OpenLayers.LonLat(59.5812886, 36.3040583 )
+          .transform(
+            new OpenLayers.Projection("EPSG:4326"), // transform from WGS 1984
+            map.getProjectionObject() // to Spherical Mercator Projection
+          );
+//     addCar(59.5812886, 36.3040583,"example popup","-1");
+    /*
+    map.events.register("click", map , function(e){
+      console.log(map.getLonLatFromPixel(e.xy));
+    });
+    */
+    map.setCenter (lonLat, zoom);
+
+    /*
+    console.log('ajax post');
+    $.post('/ajax',{abbas:'salam',mehrdad:[1,2,3]},function(res){
+      console.log(res);
+    });
+    */
+    console.log('startLocation',startLocation);
+    if(startLocation){
+      cars[startLocation.serialNumber]=startLocation;
+      addCar(startLocation.lon,startLocation.lat,'سرعت:'+startLocation.speed,startLocation.serialNumber);
+    }
+//     addCar('5935.5291','3620.7039','a','123',true);
+  });
+</script>
